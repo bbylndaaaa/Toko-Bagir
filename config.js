@@ -11,7 +11,7 @@ const CONFIG = {
 
   TOKO_NAME:      'TOKO BAGIR',
   TOKO_TAGLINE:   'Kue Kering Homemade Premium',
-  TOKO_WA:        '6281234567890',   // ← Ganti no. WA kamu (tanpa +)
+  TOKO_WA:        '6281214793639',   // ← Ganti no. WA kamu (tanpa +)
   TOKO_INSTAGRAM: 'tokobagir',       // ← Ganti username IG kamu
-  TOKO_ALAMAT:    'Jl. Melati No. 12, Cipete, Jakarta Selatan 12410',
+  TOKO_ALAMAT:    'Jl. Raya Jamblang - Bunut,Sindangmekar Kec. Depok, Kabupaten Cirebon Jawa Barat 45155',
 };
