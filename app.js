@@ -26,26 +26,56 @@ function productImg(p) {
 
 // ── INIT ─────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  showLoadingGrid('Memuat produk dari database...');
-  allProducts = await dbGetProducts();
-  renderProducts();
-  renderCart();
-  renderOrderSummary();
-  applySettings(await dbGetSettings());
-  shippingRates = await dbGetShippingRates();
-  populateProvinceOptions();
+  try {
+    showLoadingGrid('Memuat produk dari database...');
+    allProducts = await dbGetProducts();
+    renderProducts();
+  } catch(e) {
+    console.error('Gagal load produk:', e);
+    allProducts = DEFAULT_PRODUCTS;
+    renderProducts();
+    showToast('Memuat dari cache lokal (offline)', 'warn');
+  }
+
+  try {
+    renderCart();
+    renderOrderSummary();
+  } catch(e) { console.error(e); }
+
+  try {
+    applySettings(await dbGetSettings());
+  } catch(e) { console.error('Gagal load settings:', e); }
+
+  try {
+    shippingRates = await dbGetShippingRates();
+    populateProvinceOptions();
+  } catch(e) { console.error('Gagal load ongkir:', e); }
+
   startPoll();
 });
 
-// Terapkan setting toko (nama, tagline, dll) ke tampilan
+// Terapkan setting toko (nama, tagline, header bg, dll) ke tampilan
 function applySettings(s) {
   appSettings = s || {};
-  const name = appSettings.tokoName || CONFIG.TOKO_NAME || 'TOKO BAGIR';
+  const name    = appSettings.tokoName    || CONFIG.TOKO_NAME    || 'TOKO BAGIR';
   const tagline = appSettings.tokoTagline || CONFIG.TOKO_TAGLINE || '';
   document.querySelectorAll('#toko-name-display, #toko-name-footer').forEach(e => e.textContent = name);
   const tag = document.getElementById('toko-tagline-display');
   if (tag) tag.textContent = tagline;
   document.title = name + (tagline ? ' – ' + tagline : '');
+
+  // ✅ Header background foto
+  const topbar = document.querySelector('.topbar');
+  if (topbar) {
+    if (appSettings.headerBg) {
+      topbar.style.backgroundImage  = `url('${appSettings.headerBg}')`;
+      topbar.style.backgroundSize   = 'cover';
+      topbar.style.backgroundPosition = 'center';
+      topbar.style.backgroundRepeat = 'no-repeat';
+    } else {
+      topbar.style.backgroundImage  = '';
+    }
+  }
 }
 
 function showLoadingGrid(msg) {
@@ -118,36 +148,98 @@ function renderProducts() {
   }).join('');
 }
 
+// Pilihan ukuran dan harga untuk detail produk
+const SIZE_OPTIONS = [
+  { key: 'price',    label: '250g',  desc: '1 toples' },
+  { key: 'price500', label: '500g',  desc: '2 toples' },
+  { key: 'price1kg', label: '1 kg',  desc: '4 toples' },
+  { key: 'price1bal',label: '1 bal', desc: 'Grosir'   },
+];
+
+let detailSelectedSize = 'price'; // default 250g
+
 function showDetail(id) {
   const p = allProducts.find(x => x.id === id);
   if (!p) return;
+  detailSelectedSize = 'price';
+  renderDetailBox(p);
+  document.getElementById('detail-modal').classList.add('show');
+}
+
+function renderDetailBox(p) {
+  const activeSizePrice = Number(p[detailSelectedSize]) || Number(p.price) || 0;
+  const sizeBtns = SIZE_OPTIONS.map(s => {
+    const pr = Number(p[s.key]) || 0;
+    if (!pr) return ''; // sembunyikan ukuran yang tidak ada harganya
+    const isSel = detailSelectedSize === s.key;
+    return `<button onclick="selectDetailSize('${p.id}','${s.key}')"
+      style="flex:1;min-width:70px;padding:8px 4px;border:2px solid ${isSel?'var(--blue-600)':'var(--gray-200)'};border-radius:8px;background:${isSel?'var(--blue-600)':'#fff'};color:${isSel?'#fff':'var(--gray-700)'};cursor:pointer;font-size:12px;font-weight:700;transition:.15s">
+      <div>${s.label}</div>
+      <div style="font-size:10px;font-weight:500;opacity:.8">${s.desc}</div>
+      <div style="font-size:11px;margin-top:2px">${fmt(pr)}</div>
+    </button>`;
+  }).filter(Boolean).join('');
+
   document.getElementById('detail-box').innerHTML = `
     <div style="width:120px;height:120px;margin:0 auto 12px;border-radius:14px;overflow:hidden;background:linear-gradient(135deg,var(--blue-50),#EEF4FF);display:flex;align-items:center;justify-content:center">${productImg(p)}</div>
     <div style="font-size:18px;font-weight:800;margin-bottom:4px">${p.name}</div>
-    <div style="font-size:12px;color:var(--gray-500);margin-bottom:10px">${p.weight} · ${p.cat}</div>
-    <div style="font-size:13px;color:var(--gray-700);line-height:1.6;margin-bottom:16px">${p.desc||''}</div>
-    <div style="font-size:22px;font-weight:900;color:var(--blue-600);margin-bottom:20px">${fmt(p.price)}</div>
+    <div style="font-size:12px;color:var(--gray-500);margin-bottom:10px">${p.cat}</div>
+    <div style="font-size:13px;color:var(--gray-700);line-height:1.6;margin-bottom:14px">${p.desc||''}</div>
+    ${sizeBtns ? `
+    <div style="margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:var(--gray-600);margin-bottom:8px">📦 Pilih Ukuran:</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${sizeBtns}</div>
+    </div>` : ''}
+    <div style="font-size:22px;font-weight:900;color:var(--blue-600);margin-bottom:20px" id="detail-price-disp">${fmt(activeSizePrice)}</div>
     <div style="display:flex;gap:10px;justify-content:center">
-      <button class="submit-btn" style="width:auto;padding:10px 24px"
-        onclick="addToCart(${p.id});closeDetail()" ${p.stock===0?'disabled':''}>
+      <button class="submit-btn" style="width:auto;padding:10px 24px" id="detail-add-btn"
+        onclick="addToCartWithSize(${p.id});closeDetail()" ${p.stock===0?'disabled':''}>
         <i class="ti ti-cart-plus"></i>${p.stock===0?'Stok Habis':'Tambah ke Keranjang'}
       </button>
       <button onclick="closeDetail()" style="padding:10px 20px;border:1.5px solid var(--gray-200);border-radius:var(--r-md);background:#fff;cursor:pointer;font-size:13px;font-weight:600">Tutup</button>
     </div>`;
-  document.getElementById('detail-modal').classList.add('show');
 }
+
+function selectDetailSize(id, sizeKey) {
+  detailSelectedSize = sizeKey;
+  const p = allProducts.find(x => String(x.id) === String(id));
+  if (p) renderDetailBox(p);
+}
+
+function addToCartWithSize(id) {
+  const p = allProducts.find(x => x.id === id);
+  if (!p || p.stock === 0) return;
+  const sizeOpt  = SIZE_OPTIONS.find(s => s.key === detailSelectedSize) || SIZE_OPTIONS[0];
+  const price    = Number(p[detailSelectedSize]) || Number(p.price);
+  const sizeLbl  = sizeOpt.label;
+  // Gunakan key gabungan id+ukuran supaya beda ukuran = beda baris keranjang
+  const cartKey  = `${id}_${detailSelectedSize}`;
+  const ex       = cart.find(c => c.cartKey === cartKey);
+  if (ex) {
+    if (ex.qty < p.stock) ex.qty++;
+    else { showToast(`Stok ${p.name} hanya ${p.stock}`, 'warn'); return; }
+  } else {
+    cart.push({ ...p, cartKey, price, sizeLabel: sizeLbl, qty: 1 });
+  }
+  updateCartBadge();
+  showToast(`${p.name} (${sizeLbl}) ditambahkan!`);
+  renderCart();
+  renderOrderSummary();
+}
+
 function closeDetail() { document.getElementById('detail-modal').classList.remove('show'); }
 
 // ── KERANJANG ─────────────────────────────────
 function addToCart(id) {
   const p = allProducts.find(x => x.id === id);
   if (!p || p.stock === 0) return;
-  const ex = cart.find(c => c.id === id);
+  const cartKey = `${id}_price`;
+  const ex = cart.find(c => c.cartKey === cartKey);
   if (ex) {
     if (ex.qty < p.stock) ex.qty++;
     else { showToast(`Stok ${p.name} hanya ${p.stock}`, 'warn'); return; }
   } else {
-    cart.push({ ...p, qty: 1 });
+    cart.push({ ...p, cartKey, sizeLabel: '250g', qty: 1 });
   }
   updateCartBadge();
   showToast(`${p.name} ditambahkan!`);
@@ -176,14 +268,14 @@ function renderCart() {
     <div class="cart-item">
       <div class="cart-item-icon">${productImg(c)}</div>
       <div class="cart-item-info">
-        <div class="cart-item-name">${c.name}</div>
-        <div class="cart-item-price">${fmt(c.price)} / toples</div>
+        <div class="cart-item-name">${c.name} <span style="font-size:11px;color:var(--blue-500);font-weight:700">[${c.sizeLabel||'250g'}]</span></div>
+        <div class="cart-item-price">${fmt(c.price)} / porsi</div>
       </div>
       <div class="qty-ctrl">
-        <button class="qty-btn" onclick="changeQty(${c.id},-1)">−</button>
+        <button class="qty-btn" onclick="changeQty('${c.cartKey}',-1)">−</button>
         <span class="qty-num">${c.qty}</span>
-        <button class="qty-btn" onclick="changeQty(${c.id},1)">+</button>
-        <button class="del-btn" onclick="removeItem(${c.id})"><i class="ti ti-trash"></i></button>
+        <button class="qty-btn" onclick="changeQty('${c.cartKey}',1)">+</button>
+        <button class="del-btn" onclick="removeItem('${c.cartKey}')"><i class="ti ti-trash"></i></button>
       </div>
     </div>`).join('') +
   `<div class="cart-summary">
@@ -194,17 +286,17 @@ function renderCart() {
   </div>`;
 }
 
-function changeQty(id, d) {
-  const p = allProducts.find(x => x.id === id);
-  const item = cart.find(c => c.id === id);
+function changeQty(cartKey, d) {
+  const item = cart.find(c => c.cartKey === cartKey);
   if (!item) return;
+  const p = allProducts.find(x => x.id === item.id);
   item.qty += d;
-  if (item.qty <= 0) cart = cart.filter(c => c.id !== id);
+  if (item.qty <= 0) cart = cart.filter(c => c.cartKey !== cartKey);
   else if (p && item.qty > p.stock) item.qty = p.stock;
   updateCartBadge(); renderCart(); renderOrderSummary();
 }
-function removeItem(id) {
-  cart = cart.filter(c => c.id !== id);
+function removeItem(cartKey) {
+  cart = cart.filter(c => c.cartKey !== cartKey);
   updateCartBadge(); renderCart(); renderOrderSummary();
 }
 function clearCart() {
@@ -230,7 +322,7 @@ function renderOrderSummary() {
   }
   let html = cart.map(c =>
     `<div style="display:flex;justify-content:space-between;font-size:13px;color:var(--blue-800);margin-bottom:5px">
-      <span>${c.name} ×${c.qty}</span><span>${fmt(c.price*c.qty)}</span>
+      <span>${c.name} <span style="font-size:11px;color:var(--blue-400)">[${c.sizeLabel||'250g'}]</span> ×${c.qty}</span><span>${fmt(c.price*c.qty)}</span>
     </div>`).join('');
   if (deliveryMode === 'delivery' && selectedShipping) {
     html += `<div style="display:flex;justify-content:space-between;font-size:13px;color:var(--blue-800);margin-bottom:5px;border-top:1px dashed var(--gray-200);padding-top:6px">
@@ -395,7 +487,7 @@ async function submitOrder() {
   try {
     const res = await dbAddOrder({
       name, phone,
-      items: cart.map(c => ({ name:c.name, qty:c.qty, price:c.price })),
+      items: cart.map(c => ({ name: c.name + (c.sizeLabel ? ` (${c.sizeLabel})` : ''), qty: c.qty, price: c.price })),
       total,
       orderDate: orderDate || new Date().toISOString().slice(0,10),
       deliveryDate,
@@ -887,6 +979,19 @@ async function renderSettingsAdmin(el) {
         <input class="form-input" id="set-toko-alamat" type="text" value="${appSettings.tokoAlamat || CONFIG.TOKO_ALAMAT || ''}">
       </div>
       <button class="save-btn" onclick="saveBrandSettings()"><i class="ti ti-device-floppy"></i> Simpan Identitas Toko</button>
+
+      <div style="margin-top:18px;padding-top:14px;border-top:1px dashed var(--gray-200)">
+        <label class="form-label">🖼️ Foto Background Header (opsional)</label>
+        <p style="font-size:11px;color:var(--gray-400);margin-bottom:8px">Ganti warna biru header dengan foto. Ukuran ideal: 1200×200px atau lebih lebar.</p>
+        <div class="img-upload-box">
+          <input type="file" id="set-header-bg" accept="image/*" class="form-input" onchange="onHeaderBgSelected(event)">
+          <small style="color:#666">Pilih foto dari galeri. Akan disimpan ke Google Drive.</small>
+          <div class="img-preview-wrap ${appSettings.headerBg?'':'empty'}" id="header-bg-preview">
+            ${appSettings.headerBg ? `<img src="${appSettings.headerBg}" style="width:100%;height:80px;object-fit:cover;border-radius:6px">` : `<i class="ti ti-photo"></i>`}
+          </div>
+        </div>
+        ${appSettings.headerBg ? `<button onclick="removeHeaderBg()" style="margin-top:8px;padding:6px 14px;font-size:12px;border:1.5px solid var(--red-700);background:#fff;color:var(--red-700);border-radius:6px;cursor:pointer">🗑️ Hapus Foto Background</button>` : ''}
+      </div>
     </div>
 
     <div class="add-product-form" style="margin-bottom:16px">
@@ -960,15 +1065,55 @@ async function removeOngkirRate(id) {
 
 async function saveBrandSettings() {
   const data = {
-    tokoName: document.getElementById('set-toko-name').value.trim(),
-    tokoTagline: document.getElementById('set-toko-tagline').value.trim(),
-    tokoWa: document.getElementById('set-toko-wa').value.trim(),
+    tokoName:      document.getElementById('set-toko-name').value.trim(),
+    tokoTagline:   document.getElementById('set-toko-tagline').value.trim(),
+    tokoWa:        document.getElementById('set-toko-wa').value.trim(),
     tokoInstagram: document.getElementById('set-toko-ig').value.trim(),
-    tokoAlamat: document.getElementById('set-toko-alamat').value.trim(),
+    tokoAlamat:    document.getElementById('set-toko-alamat').value.trim(),
   };
   await dbSaveSettings(data);
-  applySettings(data);
+  applySettings({ ...appSettings, ...data });
   showToast('Identitas toko disimpan ✅');
+}
+
+async function onHeaderBgSelected(ev) {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const wrap = document.getElementById('header-bg-preview');
+  wrap.classList.remove('empty');
+  wrap.innerHTML = `<div class="spinner" style="width:24px;height:24px;border-width:2px"></div>`;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const base64 = reader.result.split(',')[1];
+    try {
+      const res = await dbUploadImage(base64, file.name, file.type);
+      if (res.success) {
+        wrap.innerHTML = `<img src="${res.url}" style="width:100%;height:80px;object-fit:cover;border-radius:6px">`;
+        await dbSaveSettings({ headerBg: res.url });
+        appSettings.headerBg = res.url;
+        applySettings(appSettings);
+        showToast('Background header disimpan ✅');
+      } else {
+        wrap.innerHTML = `<i class="ti ti-photo-off"></i>`;
+        wrap.classList.add('empty');
+        showToast(res.message || 'Gagal upload foto', 'error');
+      }
+    } catch(e) {
+      wrap.innerHTML = `<i class="ti ti-photo-off"></i>`;
+      wrap.classList.add('empty');
+      showToast('Gagal upload. Cek koneksi!', 'error');
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function removeHeaderBg() {
+  if (!confirm('Hapus foto background header?')) return;
+  await dbSaveSettings({ headerBg: '' });
+  appSettings.headerBg = '';
+  applySettings(appSettings);
+  showToast('Background header dihapus');
+  renderAdmin();
 }
 
 async function changeAdminPassword() {
@@ -1078,17 +1223,33 @@ function renderAddProductForm(el) {
       </div>
       <div class="form-row-2">
         <div>
-          <label class="form-label">Harga (Rp) *</label>
+          <label class="form-label">Harga 250g (Rp) *</label>
           <input class="form-input" id="p-price" type="number" placeholder="65000" value="${p?p.price:''}">
         </div>
         <div>
-          <label class="form-label">Berat / Ukuran</label>
-          <input class="form-input" id="p-weight" type="text" placeholder="250g" value="${p?p.weight:''}">
+          <label class="form-label">Harga 500g (Rp)</label>
+          <input class="form-input" id="p-price500" type="number" placeholder="120000" value="${p?p.price500||'':''}">
         </div>
       </div>
-      <div class="form-row">
-        <label class="form-label">Stok Awal (toples) *</label>
-        <input class="form-input" id="p-stock" type="number" placeholder="10" value="${p?p.stock:''}">
+      <div class="form-row-2">
+        <div>
+          <label class="form-label">Harga 1 kg (Rp)</label>
+          <input class="form-input" id="p-price1kg" type="number" placeholder="220000" value="${p?p.price1kg||'':''}">
+        </div>
+        <div>
+          <label class="form-label">Harga 1 bal / Grosir (Rp)</label>
+          <input class="form-input" id="p-price1bal" type="number" placeholder="400000" value="${p?p.price1bal||'':''}">
+        </div>
+      </div>
+      <div class="form-row-2">
+        <div>
+          <label class="form-label">Berat / Ukuran Dasar</label>
+          <input class="form-input" id="p-weight" type="text" placeholder="250g" value="${p?p.weight:''}">
+        </div>
+        <div>
+          <label class="form-label">Stok Awal (toples) *</label>
+          <input class="form-input" id="p-stock" type="number" placeholder="10" value="${p?p.stock:''}">
+        </div>
       </div>
       <div class="form-row">
         <label class="form-label">Deskripsi Produk</label>
@@ -1147,45 +1308,30 @@ function onProductImageSelected(ev) {
 }
 
 async function saveProduct() {
-  const name  = document.getElementById('p-name').value.trim();
-  const cat   = document.getElementById('p-cat').value;
-  const price = parseInt(document.getElementById('p-price').value);
-  const weight= document.getElementById('p-weight').value.trim() || '250g';
-  const stock = parseInt(document.getElementById('p-stock').value);
-  const desc  = document.getElementById('p-desc').value.trim();
-  if (!name)               { showToast('Nama produk wajib!','error'); return; }
-  if (isNaN(price)||price<=0){ showToast('Harga tidak valid!','error'); return; }
+  const name     = document.getElementById('p-name').value.trim();
+  const cat      = document.getElementById('p-cat').value;
+  const price    = parseInt(document.getElementById('p-price').value);
+  const price500 = parseInt(document.getElementById('p-price500').value) || 0;
+  const price1kg = parseInt(document.getElementById('p-price1kg').value) || 0;
+  const price1bal= parseInt(document.getElementById('p-price1bal').value) || 0;
+  const weight   = document.getElementById('p-weight').value.trim() || '250g';
+  const stock    = parseInt(document.getElementById('p-stock').value);
+  const desc     = document.getElementById('p-desc').value.trim();
+  if (!name)                { showToast('Nama produk wajib!','error'); return; }
+  if (isNaN(price)||price<=0){ showToast('Harga 250g tidak valid!','error'); return; }
   if (isNaN(stock)||stock<0) { showToast('Stok tidak valid!','error'); return; }
   const btn = document.getElementById('save-btn');
   btn.disabled = true;
   btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;display:inline-block;margin-right:6px"></div> Menyimpan ke Sheets...';
+  const productData = { name, cat, emoji:'', price, price500, price1kg, price1bal, weight, stock, desc, image: selectedImageUrl };
   try {
     if (editingProductId) {
-      await dbUpdateProduct({
-      id: editingProductId,
-      name,
-      cat,
-      emoji:'',
-      price,
-      weight,
-      stock,
-      desc,
-      image: selectedImageUrl
-    });
+      await dbUpdateProduct({ id: editingProductId, ...productData });
       const idx = allProducts.findIndex(x=>x.id===editingProductId);
-      if (idx!==-1) allProducts[idx] = {id:editingProductId,name,cat,price,weight,stock,desc,image:selectedImageUrl};
+      if (idx!==-1) allProducts[idx] = { id:editingProductId, ...productData };
     } else {
-      const res = await dbAddProduct({
-      name,
-      cat,
-      emoji:'',
-      price,
-      weight,
-      stock,
-      desc,
-      image: selectedImageUrl
-    });
-      allProducts.push({id:res.id||Date.now(),name,cat,price,weight,stock,desc,image:selectedImageUrl});
+      const res = await dbAddProduct(productData);
+      allProducts.push({ id: res.id || Date.now(), ...productData });
     }
     localStorage.setItem('bagir_products_cache', JSON.stringify(allProducts));
     renderProducts();
